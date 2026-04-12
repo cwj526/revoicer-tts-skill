@@ -1,6 +1,6 @@
 {
-  "ci_session": "bgn6f2ljfa6cg6o6fnfv9hfe0svnq8rh",
-  "campaign_id": "92727",
+  "ci_session": "<your_ci_session_cookie>",
+  "campaign_id": "<your_campaign_id>",
   "voice": "en-US-JennyMultilingualNeural",
   "language": "en-GB"
 }
