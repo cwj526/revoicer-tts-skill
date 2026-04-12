@@ -14,34 +14,58 @@ Extract from the user's message:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | words | Word list (required) | — |
-| voice | `emily` (女声) or `james` (男声) | `emily` |
+| voice | `emily` (女声) or `james` / `axel` (男声) | — |
 | pause | Seconds of silence between words | none |
 | output_dir | Where to save the MP3 | `~/Downloads/revoicer` |
 | filename | Output filename (no .mp3) | first word in list |
 
-If the user hasn't specified voice or pause, use the defaults.
+## Step 2 — Clean and validate the word list
 
-## Step 2 — Confirm parameters if needed
+Check every word for non-alphabetic characters (numbers, punctuation, symbols, Chinese characters, etc.).
 
-If the user's message already contains all required parameters (word list, and optionally voice/pause/output), proceed directly to Step 3 without asking for confirmation.
+- If all words are clean plain English words, proceed silently.
+- If any word contains irregular characters, show the user what was found and suggest a cleaned version. Ask whether to use the cleaned list or keep the original.
 
-Only show a confirmation summary if something is ambiguous or missing. Use this format (in Chinese):
+Example:
+> 我发现单词列表里有一些符号，帮你整理了一下：
+>
+> 原始：`hello!`、`world.`、`(classic)`
+> 整理后：`hello`、`world`、`classic`
+>
+> 用整理后的版本继续吗？
+
+Wait for the user's response before moving on.
+
+## Step 3 — Ask for voice if not specified
+
+If the user did not mention a voice preference, always ask — do not assume a default:
+
+> 请问用哪个音色？
+> - **Emily**（女声）
+> - **James**（男声）
+> - **Axel**（男声）
+
+Wait for the user's choice.
+
+## Step 4 — Confirm all parameters
+
+Show a summary of everything and ask for confirmation before generating:
 
 ---
 **请确认以下参数：**
 
 - 单词列表：hello、world、classic
 - 音色：Emily（女声）
-- 停顿时间：每个单词之间 2 秒
+- 停顿时间：每个单词之间 2 秒（如未指定则显示"无停顿"）
 - 保存位置：~/Downloads/revoicer/hello.mp3
 
 确认后我就开始生成，或者告诉我需要修改哪里。
 
 ---
 
-If the user requests changes, update the parameters and show the summary again before proceeding.
+If the user requests changes, update and show the summary again. Only proceed once the user explicitly confirms.
 
-## Step 3 — Get the session cookie
+## Step 5 — Get the session cookie
 
 Read the cookie from the skill's own `config.json` (same directory as this SKILL.md):
 
@@ -51,7 +75,7 @@ Read the cookie from the skill's own `config.json` (same directory as this SKILL
 
 Get the value of `ci_session`. If the file doesn't exist, ask the user to provide their cookie (see Cookie expired section below).
 
-## Step 4 — Build and send the request
+## Step 6 — Build and send the request
 
 **Endpoint**: `POST https://revoicer.app/speak/generate_voice`
 
@@ -89,6 +113,7 @@ Cookie: ci_session=<value from config.json>
 |-----|----------|------------|
 | emily | `en-US-JennyMultilingualNeural` | `en-GB` |
 | james | `en-GB-RyanNeural` | `en-GB` |
+| axel  | `en-US-TonyNeural`             | `en-US` |
 
 ### Building the `text` field (HTML)
 
@@ -110,13 +135,13 @@ Pause label format: `pause 2sec`, `pause 1.5sec`, etc.
 
 Words joined by newlines, with a trailing newline: `hello\nworld\n`
 
-## Step 5 — Download the MP3
+## Step 7 — Download the MP3
 
 Parse the response JSON, get `data.voice.download_link`, download the file to `output_dir/filename.mp3`. Create the output directory if it doesn't exist.
 
 Use Python to execute steps 3 and 4 inline — no external script needed.
 
-## Step 6 — Confirm to the user
+## Step 8 — Confirm to the user
 
 On success, tell the user in a friendly tone:
 - Where the file was saved

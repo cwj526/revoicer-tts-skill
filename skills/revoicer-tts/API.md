@@ -176,7 +176,7 @@ settings=default_voice&value={"LanguageCode":"en-GB","Id":"en-GB-RyanNeural"}
 | 声音 ID | 名称 | 性别 | 语言 |
 |---------|------|------|------|
 | `en-US-JennyMultilingualNeural` | Emily | Female | English (US) |
-| `en-GB-RyanNeural` | James | Male | English (GB) |
+| `en-GB-RyanNeural` | James | Male | English (GB) |\n| `en-US-TonyNeural` | Axel | Male | English (US) |
 
 ---
 
