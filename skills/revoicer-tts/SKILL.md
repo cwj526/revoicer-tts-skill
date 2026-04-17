@@ -19,15 +19,32 @@ Extract from the user's message:
 | output_dir | Where to save the MP3 | `~/Downloads/revoicer` |
 | filename | Output filename (no .mp3) | first word in list |
 
+For batch mode, also collect:
+| Parameter | Description |
+|-----------|-------------|
+| group_size | Words per file (e.g. 50) |
+| naming_pattern | e.g. `List_{n:02d}_US` |
+
 ## Step 2 — Clean and validate the word list
 
-Check every word for non-alphabetic characters (numbers, punctuation, symbols, Chinese characters, etc.).
+### Auto-clean silently (no user confirmation needed)
 
-- If all words are clean plain English words, proceed silently.
-- If any word contains irregular characters, show the user what was found and suggest a cleaned version. Ask whether to use the cleaned list or keep the original.
+Apply these rules to every word before doing anything else:
 
-Example:
-> 我发现单词列表里有一些符号，帮你整理了一下：
+- **Superscript digits** (`¹²³⁴⁵⁶⁷⁸⁹⁰`) → remove entirely
+- **Non-breaking hyphen** (U+2011 `‑`) → replace with regular hyphen `-`
+- **Ellipsis** (`…` or `...`) → replace with a single space, then strip
+- **Extra whitespace** → collapse to single space and strip
+
+These are cosmetic artifacts common in vocabulary lists and don't affect pronunciation.
+
+### Ask the user only about remaining non-ASCII characters
+
+After auto-cleaning, check for any remaining non-ASCII characters. Exclude accented Latin letters that are valid in English loanwords (é, è, ê, ë, ü, ö, ä, ñ, ç, etc.) — these are fine and should pass silently.
+
+If anything else remains (e.g. Chinese characters, symbols, emoji), show the user:
+
+> 我发现单词列表里有一些特殊字符，帮你整理了一下：
 >
 > 原始：`hello!`、`world.`、`(classic)`
 > 整理后：`hello`、`world`、`classic`
@@ -49,21 +66,25 @@ Wait for the user's choice.
 
 ## Step 4 — Confirm all parameters
 
-Show a summary of everything and ask for confirmation before generating:
+Show a summary and ask for confirmation before generating.
 
----
-**请确认以下参数：**
+**Single file:**
+> **请确认以下参数：**
+> - 单词列表：hello、world、classic
+> - 音色：Emily（女声）
+> - 停顿时间：每个单词之间 2 秒（如未指定则显示"无停顿"）
+> - 保存位置：~/Downloads/revoicer/hello.mp3
 
-- 单词列表：hello、world、classic
-- 音色：Emily（女声）
-- 停顿时间：每个单词之间 2 秒（如未指定则显示"无停顿"）
-- 保存位置：~/Downloads/revoicer/hello.mp3
+**Batch mode:**
+> **请确认以下参数：**
+> - 单词总数：1500 个
+> - 分组：每组 50 个，共 30 个文件
+> - 音色：Axel（美音男声）
+> - 停顿时间：每个单词之间 2 秒
+> - 命名格式：List_01_US.mp3 ～ List_30_US.mp3
+> - 保存位置：~/Downloads/revoicer/
 
-确认后我就开始生成，或者告诉我需要修改哪里。
-
----
-
-If the user requests changes, update and show the summary again. Only proceed once the user explicitly confirms.
+Only proceed once the user explicitly confirms.
 
 ## Step 5 — Get the session cookie
 
@@ -73,7 +94,7 @@ Read the cookie from the skill's own `config.json` (same directory as this SKILL
 <skill_dir>/config.json
 ```
 
-Get the value of `ci_session`. If the file doesn't exist, ask the user to provide their cookie (see Cookie expired section below).
+Get the value of `ci_session` and `campaignId`. If the file doesn't exist, ask the user to provide their cookie (see Cookie expired section below).
 
 ## Step 6 — Build and send the request
 
@@ -103,7 +124,7 @@ Cookie: ci_session=<value from config.json>
   "simpletext": "<words joined by \n, ending with \n>",
   "charCount": <total chars in simpletext excluding newlines>,
   "wordsCount": <number of words>,
-  "campaignId": "<campaign_id from config.json>"
+  "campaignId": "<campaignId from config.json>"
 }
 ```
 
@@ -135,19 +156,62 @@ Pause label format: `pause 2sec`, `pause 1.5sec`, etc.
 
 Words joined by newlines, with a trailing newline: `hello\nworld\n`
 
+### Retry logic
+
+Wrap every API call and download in a retry loop — transient SSL/network errors are common:
+
+```python
+import time, ssl
+
+ctx = ssl.create_default_context()
+
+def call_with_retry(fn, max_attempts=3):
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == max_attempts - 1:
+                raise
+            wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+            time.sleep(wait)
+```
+
+Use `context=ctx` in all `urlopen` calls to avoid SSL issues on macOS.
+
 ## Step 7 — Download the MP3
 
 Parse the response JSON, get `data.voice.download_link`, download the file to `output_dir/filename.mp3`. Create the output directory if it doesn't exist.
 
-Use Python to execute steps 3 and 4 inline — no external script needed.
+Use Python to execute steps 6 and 7 inline — no external script needed.
 
-## Step 8 — Confirm to the user
+## Step 8 — Batch mode
+
+When generating multiple files, loop through each group and:
+
+1. **Skip existing files** — check if the output file already exists before calling the API. If it does, print `[SKIP] filename` and move on. This allows safely resuming interrupted jobs.
+2. **Show progress** — print `[OK] filename (N/total)` after each successful download.
+3. **On failure** — retry up to 3 times (see Step 6). If all retries fail, print `[FAIL] filename` and continue to the next file rather than aborting the whole batch.
+
+```python
+for i, group in enumerate(groups):
+    out_path = os.path.join(output_dir, f"{name}.mp3")
+    if os.path.exists(out_path):
+        print(f"[SKIP] {name}")
+        continue
+    # ... generate ...
+    print(f"[OK] {name} ({i+1}/{total})")
+```
+
+After the batch completes, report how many were generated, skipped, and failed.
+
+## Step 9 — Confirm to the user
 
 On success, tell the user in a friendly tone:
-- Where the file was saved
-- Which words, which voice, pause setting if any
+- Where the files were saved
+- How many generated / skipped / failed
+- Which voice, pause setting
 
-Example: "好了！已经生成了 3 个单词（hello、world、classic）的音频，用的是 Emily 女声，每个词之间停顿 2 秒。文件保存在 ~/Downloads/revoicer/hello.mp3。"
+Example (batch): "好了！30 个音频全部生成完毕，用的是 Axel 美音，每个词之间停顿 2 秒。文件保存在 ~/Downloads/revoicer/。"
 
 ---
 
@@ -157,7 +221,7 @@ Never show raw errors. Always guide the user.
 
 ### Cookie expired
 
-**Signs**: response is HTML (`<!DOCTYPE html>`), or `{"success":false}`.
+**Sign**: the response body is HTML (`<!DOCTYPE html>` or `<html`).
 
 Tell the user:
 
@@ -170,13 +234,47 @@ Tell the user:
 
 Once the user provides the new value, update `ci_session` in the skill's `config.json`, then retry automatically.
 
+### API error `{"success": false}`
+
+This is distinct from cookie expiry. Check the `message` field in the response:
+
+```python
+result = json.loads(body)
+if not result.get("success"):
+    msg = result.get("message", "未知错误")
+    # suggest retry first, only escalate to cookie if retries all fail
+```
+
+Tell the user:
+
+> 服务器返回了一个错误：「{msg}」。我先自动重试几次，如果还是不行再告诉你。
+
+Only ask for a new cookie if retries all fail AND the error suggests an auth issue.
+
 ### Network error
 
-> 网络连接有问题，请检查网络后我们再试一次。
+Retry automatically (see Step 6). Only surface to the user if all retries fail:
+
+> 网络连接有问题，已重试 3 次仍然失败。请检查网络后告诉我，我们再试一次。
 
 ### Any other error
 
 Investigate silently, fix if possible. If not, ask the user only for what's strictly needed.
+
+---
+
+## config.json reference
+
+```json
+{
+  "ci_session": "<cookie value>",
+  "campaignId": "<campaign id>",
+  "voice": "en-US-JennyMultilingualNeural",
+  "language": "en-GB"
+}
+```
+
+All keys use camelCase. `campaignId` is tied to the revoicer account, not the machine.
 
 ---
 
@@ -185,4 +283,4 @@ Investigate silently, fix if possible. If not, ask the user only for what's stri
 This skill is self-contained. To use on a new machine:
 1. Copy the entire skill folder
 2. Update `config.json` with the new machine's `ci_session` cookie
-3. The `campaignId` in `config.json` is tied to the revoicer account, not the machine — keep it as-is
+3. `campaignId` stays the same — it's account-level, not machine-level
